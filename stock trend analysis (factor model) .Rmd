@@ -1,0 +1,627 @@
+---
+title: factor model
+author: Jialing Deng
+date: Mar 23
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 1
+---
+
+_Note:_ To help show what your homework should look like, these solutions don't
+display the code used.  You should look at the Rmd file as well to see those.
+(The comments to the code include some notes on why it's done the way it is, and
+alternatives.)
+
+```{r, include=FALSE}
+# Standard set-up
+library(knitr)
+knitr::opts_chunk$set(warning=FALSE, message=FALSE)
+
+
+# Set knitr options for knitting code into the report:
+# - Save results so that code blocks aren't re-run unless code changes (cache),
+  # _or_ a relevant earlier code block changed (autodep)
+  # but don't re-run if only the comments changed (cache.comments)
+# - Don't clutter R output with messages or warnings (message, warning)
+  # This _will_ leave error messages showing up in the knitted report
+# - By default, don't print the code (echo)
+opts_chunk$set(cache=TRUE, autodep=TRUE, cache.comments=FALSE,
+               message=FALSE, warning=FALSE, echo=FALSE)
+```
+
+
+
+
+
+
+```{r}
+load("stockData.RData")
+
+```
+
+
+
+
+
+
+
+
+# Q1
+
+## a. 
+
+```{r}
+
+date <- as.Date(sort(rownames(close_price)))
+price_matrix <- as.matrix(close_price)
+
+ymin <- min(price_matrix, na.rm = TRUE)
+ymax <- max(price_matrix, na.rm = TRUE)
+
+
+plot(date, price_matrix[, 1], type = "l",
+     xlab = "Date", ylab = "Closing Price",
+     main = "Closing Prices of 28 Large US Corporations",
+     ylim = c(ymin, ymax))
+
+
+colors <- rainbow(ncol(price_matrix))
+for (i in 1:ncol(price_matrix)) {
+  lines(date, price_matrix[, i], col = colors[i])
+}
+
+
+
+
+```
+
+## b.
+```{r}
+price_matrix <- as.matrix(close_price)
+log_returns_matrix <- diff(log(price_matrix)) 
+log_returns <- as.data.frame(log_returns_matrix)
+log_return_dates <- as.Date(rownames(close_price))[-1]
+plot(log_return_dates, log_returns_matrix[,1], type = "n",
+     xlab = "Date", ylab = "Log Daily Return",
+     main = "Log Daily Returns of 28 Large US Corporations")
+
+
+for (i in 1:ncol(log_returns_matrix)) {
+  lines(log_return_dates, log_returns_matrix[, i],col = colors[i])
+}
+
+
+```
+Yes, the log returns appear more comparable than the raw closing prices, as the 
+log returns are centered around zero, with similar fluctuations for most stocks.
+
+
+\newpage
+
+### Q2.
+
+### a.
+```{r}
+ba_log_returns <- log_returns$BA  
+hist(ba_log_returns, breaks = 30, probability = TRUE, 
+     col = "skyblue", 
+     main = "Histogram of Boeing (BA) Log Returns",
+     xlab = "Log Return", ylab = "Density")
+```
+### b. 
+```{r}
+
+
+mu_mle <- mean(ba_log_returns)
+sigma_mle <- sd(ba_log_returns)
+
+hist(ba_log_returns, breaks = 30, probability = TRUE,
+     col = "skyblue",
+     main = "Histogram of Boeing (BA) Log Returns",
+     xlab = "Log Return", ylab = "Density")
+
+curve(dnorm(x, mean = mu_mle, sd = sigma_mle), 
+      col = "red", lwd = 2, add = TRUE)
+
+```
+The Gaussian distribution appears to fit the histogram of Boeing log returns well in 
+the center, capturing the general bell-shaped curve around the mean.However, there 
+are visible deviations in the tails: the histogram shows slightly heavier tails 
+than the Gaussian curve, particularly on the left side. 
+
+
+## c.
+
+```{r}
+kde_bcv <- density(ba_log_returns, bw = "bcv")
+mu_mle <- mean(ba_log_returns)
+sigma_mle <- sd(ba_log_returns)
+gaussian_y <- dnorm(kde_bcv$x, mean = mu_mle, sd = sigma_mle)
+
+plot_df <- data.frame(
+  x = kde_bcv$x,
+  KDE = kde_bcv$y,
+  Gaussian = gaussian_y
+)
+
+
+library(ggplot2)
+ggplot(plot_df) +
+  geom_line(aes(x = x, y = KDE, color = "KDE"), linewidth = 1.2) +
+  geom_line(aes(x = x, y = Gaussian, color = "Gaussian"), linetype = "dashed", linewidth = 1.2) +
+  scale_color_manual(name = "Density Type", values = c("KDE" = "blue", "Gaussian" = "red")) +
+  labs(
+    title = "KDE vs. Gaussian Fit for Boeing (BA) Log Returns (BCV)",
+    x = "Log Return", y = "Density"
+  ) +
+  theme_minimal()
+
+
+
+```
+Guassian is underestimating the peak as well at the tails compared to KDE. 
+
+## d.
+```{r}
+
+library(ggplot2)
+library(reshape2)
+
+stock_names <- colnames(log_returns)[colnames(log_returns) != "Date"]
+
+density_list <- list()
+
+for (stock in stock_names) {
+  stock_returns <- log_returns[[stock]]
+  kde_result <- density(stock_returns, bw = "bcv")
+  temp_df <- data.frame(
+    x = kde_result$x,
+    density = kde_result$y,
+    Stock = stock
+  )
+  density_list[[stock]] <- temp_df
+}
+all_kde_data <- do.call(rbind, density_list)
+ggplot(all_kde_data, aes(x = x, y = density, color = Stock)) +
+  geom_line(alpha = 0.8) +
+  labs(
+    title = "Kernel Density Estimates of Log Returns for 28 Stocks",
+    x = "Log Return", y = "Density"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none") 
+
+```
+
+
+The other curves for the other 27 stocks look similar to the BA curves, and they 
+seem to support my previous answer that Guassian is underestimating the peak as 
+well at the tails. 
+
+\newpage
+
+
+## Problem 3
+
+## a.
+
+```{r}
+log_returns_matrix <- diff(log(as.matrix(close_price)))
+factor_model <- factanal(log_returns_matrix, factors = 1, scores = "regression")
+factor_loadings <- factor_model$loadings[, 1]
+sorted_loadings <- sort(factor_loadings)
+
+barplot(sorted_loadings,
+        las = 2,
+        main = "Factor Loadings from One-Factor Model",
+        xlab = "Stocks",
+        ylab = "Factor Loadings")
+
+
+
+```
+
+\newpage
+
+```{r}
+library(knitr)
+
+factor_loading_table <- data.frame(
+  Stock = names(factor_loadings),
+  Loading = factor_loadings
+)
+
+factor_loading_table <- factor_loading_table[order(factor_loading_table$Loading), ]
+
+kable(factor_loading_table,
+      caption = "Factor Loadings from One-Factor Model",
+      digits = 4,
+      align = c("l", "r"))
+
+
+```
+
+
+
+
+## b.
+
+The one-factor model appears to extract a market-wide risk factor, possibly 
+related to macroeconomic or financial conditions. Stocks in sectors like financials
+and industrials load heavily(e.x. JPM, GS), while more defensive or sector-specific 
+firms (like DD, WMT, AXP) load lower. This distribution aligns with economic 
+intuition: some companies are inherently more cyclically exposed than others.
+
+## c.
+
+
+```{r}
+factor_scores <- factor_model$scores[, 1]
+score_dates <- as.Date(rownames(close_price))[-1]
+
+plot(score_dates, factor_scores, type = "l",
+     col = "darkblue",
+     xlab = "Date", ylab = "Factor Score",
+     main = "Factor Scores from One-Factor Model")
+
+  
+```
+
+The factor scores fluctuate around zero, as expected in a factor model.
+
+There are some noticeable spikes, indicating market-wide shocks or volatility clusters.
+
+One major drop and sharp recovery occurs around late August to early September 2015. 
+
+### d.
+
+The overall trend is similar with spikes and an obvious drop around late August to
+early September. 
+The factor score plot, however, distills the co-movement across all 
+stocks into a single series. It’s much smoother and captures shared market behavior 
+rather than individual noise.
+
+\newpage
+
+## Q4.
+
+```{r}
+library(boot)
+library(ggplot2)
+
+
+resample.cases <- function() {
+  resampled_data <- log_returns[sample(1:nrow(log_returns), replace = TRUE), ]
+  return(resampled_data)
+}
+
+factor_loading_estimator <- function(data) {
+  fa_model <- factanal(data, factors = 1, scores = "regression")
+  return(fa_model$loadings[, 1])
+}
+
+set.seed(402)
+B <- 400
+bootstrap_loadings <- replicate(B, factor_loading_estimator(resample.cases()))
+
+equitails <- function(x, alpha) {
+  lower <- quantile(x, alpha / 2)
+  upper <- quantile(x, 1 - alpha / 2)
+  return(c(lower, upper))
+}
+
+ci_85 <- apply(bootstrap_loadings, 1, equitails, alpha = 0.15)
+
+fa_original <- factanal(log_returns, factors = 1, scores = "regression")
+original_loadings <- fa_original$loadings[, 1]
+
+ci_df <- data.frame(
+  Stock = rownames(fa_original$loadings),
+  Estimate = original_loadings,
+  Lower_85_CI = ci_85[1, ],
+  Upper_85_CI = ci_85[2, ]
+)
+
+ggplot(ci_df, aes(x = reorder(Stock, Estimate), y = Estimate)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = Lower_85_CI, ymax = Upper_85_CI), width = 0.2) +
+  theme_minimal() +
+  coord_flip()+
+  labs(
+    title = "Bootstrapped 85% CI for Factor Loadings",
+    x = "Stocks",
+    y = "Factor Loadings"
+  )
+
+
+```
+
+\newpage
+
+### Q5. 
+```{r}
+cov_GE_CVX <- cov(log_returns$GE, log_returns$CVX) 
+cov_GE_BA <- cov(log_returns$GE, log_returns$BA)    
+cov_GS_CVX <- cov(log_returns$GS, log_returns$CVX)  
+cov_GS_BA <- cov(log_returns$GS, log_returns$BA)  
+
+
+```
+
+Sample Covariances:
+GE and Chevron:  $1.23 \times 10^{-4}$
+GE and Boeing: $9.32 \times 10^{-5}$
+Goldman Sachs and Chevron: $1.34 \times 10^{-4}$
+Goldman Sachs and Boeing: $1.14 \times 10^{-4}$
+
+## b.
+
+```{r}
+
+factor_loadings <- factor_model$loadings[, 1]  
+factor_scores <- factor_model$scores[, 1]
+sd_GE <- sd(log_returns$GE)
+sd_CVX<-sd(log_returns$CVX)
+sd_BA<-sd(log_returns$BA)
+sd_GS<-sd(log_returns$GS)
+pred_cov_GE_CVX <- factor_loadings["GE"] * factor_loadings["CVX"]*sd_GE*sd_CVX
+pred_cov_GE_BA <- factor_loadings["GE"] * factor_loadings["BA"]*sd_GE*sd_BA
+pred_cov_GS_CVX <- factor_loadings["GS"] * factor_loadings["CVX"]*sd_CVX*sd_GS
+pred_cov_GS_BA <- factor_loadings["GS"] * factor_loadings["BA"]*sd_GS*sd_BA
+
+
+```
+The covariance of GE and Chevron is $1.10 \times 10^{-4}$
+
+GE and Boeing is  $9.79 \times 10^{-5}$
+
+Goldman Sachs and Chevron is  $1.32 \times 10^{-4}$
+
+Goldman Sachs and Boeing: $1.17 \times 10^{-4}$
+
+
+
+### c.
+
+
+
+The one-factor model implies that the covariance between two assets is:
+
+\[
+\text{Cov}[i, j] = w_i w_j \cdot sd_i \cdot sd_j
+\]
+
+where \( w_i \) and \( w_j \) are the factor loadings for assets \( i \) and
+\( j \), and \( sd_i \), \( sd_j \) are their sample standard deviations.
+
+Applying this to our four covariances:
+
+\[
+\text{Cov}[GE, CVX] = w_{GE} w_{CVX} \cdot sd_{GE} \cdot sd_{CVX}
+\]
+\[
+\text{Cov}[GE, BA] = w_{GE} w_{BA} \cdot sd_{GE} \cdot sd_{BA}
+\]
+\[
+\text{Cov}[GS, CVX] = w_{GS} w_{CVX} \cdot sd_{GS} \cdot sd_{CVX}
+\]
+\[
+\text{Cov}[GS, BA] = w_{GS} w_{BA} \cdot sd_{GS} \cdot sd_{BA}
+\]
+
+Now compute the full ratio:
+
+\[
+\frac{\frac{\text{Cov}[GE, CVX]}{\text{Cov}[GE, BA]}}{\frac{\text{Cov}[GS, CVX]}{\text{Cov}[GS, BA]}} 
+= \frac{\frac{w_{GE} w_{CVX} \cdot sd_{GE} sd_{CVX}}{w_{GE} w_{BA} \cdot sd_{GE} sd_{BA}}}
+       {\frac{w_{GS} w_{CVX} \cdot sd_{GS} sd_{CVX}}{w_{GS} w_{BA} \cdot sd_{GS} sd_{BA}}}
+\]
+
+
+\[
+= \frac{\frac{w_{CVX} \cdot sd_{CVX}}{w_{BA} \cdot sd_{BA}}}
+        {\frac{w_{CVX} \cdot sd_{CVX}}{w_{BA} \cdot sd_{BA}}} = 1
+\]
+
+So this compound ratio of covariances should equal 1, since all the stock standard 
+deviations and factor terms cancel out.
+
+
+## d.
+
+```{r}
+set.seed(402)
+library(boot)
+
+resample.cases <- function() {
+  log_returns[sample(1:nrow(log_returns), replace = TRUE), ]
+}
+
+cov_ratio_estimator <- function(data) {
+  num <- cov(data[, "GE"], data[, "CVX"]) / cov(data[, "GE"], data[, "BA"])
+  denom <- cov(data[, "GS"], data[, "CVX"]) / cov(data[, "GS"], data[, "BA"])
+  return(num / denom)
+}
+
+equitails <- function(x, alpha) {
+  lower <- quantile(x, alpha / 2)
+  upper <- quantile(x, 1 - alpha / 2)
+  return(c(lower, upper))
+}
+
+rboot <- function(statistic, simulator, B) {
+  replicate(B, statistic(simulator()))
+}
+
+bootstrap.ci <- function(statistic, simulator, B, t.hat, level = 0.95) {
+  tboots <- rboot(statistic, simulator, B)
+  alpha <- 1 - level
+  ci <- equitails(tboots, alpha)
+  lower <- t.hat + (t.hat - ci[2])
+  upper <- t.hat + (t.hat - ci[1])
+  return(cbind(lower = lower, upper = upper))
+}
+
+set.seed(402)
+t.hat <- cov_ratio_estimator(log_returns)
+
+cov_ratio_ci <- bootstrap.ci(
+  statistic = cov_ratio_estimator,
+  simulator = resample.cases,
+  B = 400,
+  t.hat = t.hat,
+  level = 0.95
+)
+
+
+
+
+
+```
+
+
+The 95% bootstrapping CI is  [ 0.8727 , 1.3232 ] which contains 1, so the observed 
+covariances are consistent with the one-factor model.
+
+\newpage
+
+### Q6
+
+
+```{r}
+library(dplyr)
+f2_model <- factanal(log_returns, factors = 2, scores = "regression")
+
+loadings_df <- as.data.frame(f2_model$loadings[, 1:2])
+
+loadings_df$Asset <- rownames(loadings_df)
+
+loadings_df_f1 <- loadings_df %>%
+  arrange(Factor1) %>%
+  mutate(Asset = factor(Asset, levels = Asset))
+
+ggplot(loadings_df_f1, aes(x = Asset, y = Factor1)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Factor 1 Loadings", x = "Assets", y = "Loading") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+loadings_df_f2 <- loadings_df %>%
+  arrange(Factor2) %>%
+  mutate(Asset = factor(Asset, levels = Asset))
+
+ggplot(loadings_df_f2, aes(x = Asset, y = Factor2)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Factor 2 Loadings", x = "Assets", y = "Loading") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+
+library(knitr)
+
+loadings_table <- loadings_df %>%
+  select(Asset, Factor1, Factor2) %>%
+  arrange(Factor1)
+
+kable(loadings_table, 
+      caption = "Factor Loadings from Two-Factor Model",
+      digits = 4,
+      align = c("l", "r", "r"))
+
+
+
+```
+
+For the two-factor model, some assets that had very high Factor 1 loadings in the 
+one-factor model now  have reduced loadings.This may suggests that these assets 
+are influenced by an additional, more specific risk factor captured by Factor 2. 
+Some assets like CVX, XOM, CAT now have much lower loadings compared to others, 
+suggesting the factor is no longer just capturing general market exposure. As a result, 
+Factor 1 has shifted from a pure market-wide factor to one that may now capture a 
+more sector-specific or thematic variation, due to the introduction of Factor 2, 
+which absorbs part of the general market co-movement.
+
+
+
+
+\newpage
+
+## Q7. 
+```{r}
+log_tricky <- diff(log(as.matrix(tricky_prices)))
+score_dates <- as.Date(rownames(tricky_prices))[-1]
+f1_tricky <- factanal(log_tricky, factors = 1, scores = "regression")
+factor_loadings <- f1_tricky$loadings[, 1]
+sorted_loadings <- sort(factor_loadings)
+barplot(sorted_loadings,
+        las = 2,
+        main = "Factor Loadings from One-Factor Model",
+        xlab = "Stocks",
+        ylab = "Factor Loadings")
+factor_scores <- f1_tricky$scores[, 1]
+
+
+
+library(knitr)
+
+factor_loading_table <- data.frame(
+  Stock = names(factor_loadings),
+  Loading = factor_loadings
+)
+
+factor_loading_table <- factor_loading_table[order(factor_loading_table$Loading), ]
+
+
+kable(factor_loading_table, 
+      caption = "Factor Loadings from One-Factor Model",
+      digits = 3, 
+      align = c("l", "r"))
+```
+
+```{r}
+plot(score_dates, factor_scores, type = "l",
+     col = "darkblue",
+     xlab = "Date", ylab = "Factor Score",
+     main = "Factor Scores from One-Factor Model (30 Stocks)")
+
+```
+
+```{r}
+plot(score_dates, log_tricky[, 1], type = "n",
+     xlab = "Date", ylab = "Log Daily Return",
+     main = "Log Daily Returns of 30 US Stocks")
+colors <- rainbow(ncol(log_tricky))
+for (i in 1:ncol(log_tricky)) {
+  lines(score_dates, log_tricky[, i], col = adjustcolor(colors[i], alpha.f = 0.5))
+}
+```
+
+
+When the two new stocks, Visa (V) and Nike (NKE), were added to the dataset, there 
+was a noticeable change in the distribution of factor loadings. In the original 
+plot with 28 large US corporations, all stocks had relatively high factor loadings, 
+clustering around 0.5 to 0.8, indicating a strong relationship with the dominant 
+market factor. However, after adding V and NKE, both appeared on the far left of the 
+bar chart, showing significantly lower factor loadings. This suggests that these 
+two companies are less correlated with thecommon market factor driving the other
+28 stocks. As a result, the overall variation in factor exposures increased, 
+and the previously tight cluster of high factor loadings became more spread out.
+
+Comparing the factor scores from the one-factor model before and after 
+adding Visa (V) and Nike (NKE), we see that the overall pattern remains similar, 
+with scores fluctuating around zero and capturing market-wide shocks like the volatility
+spike in late August 2015,  indicating that the core structure of the market-driven 
+variation is preserved.
+
+As the factor scores, the overall pattern of log daily returns remained largely 
+similar before and after adding the 2 stocks. This suggests that the newly added 
+stocks behaved similarly to the original group or were not volatile enough to noticeably 
+alter the aggregate pattern.
+
+\newpage
+
+## Q8.
+
+7 hours
